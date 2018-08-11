@@ -2,13 +2,16 @@
 #include "utility/LinkedList.h"
 
 
-ModbusRTUSlave::ModbusRTUSlave(byte slaveAddress, HardwareSerial* serialport) 
+ModbusRTUSlave::ModbusRTUSlave(byte const slaveAddress, HardwareSerial* serialport, u8 const controlPinArg) :
+  slave(slaveAddress),
+  ser(serialport),
+  controlPin(controlPinArg),
+  isReading(true),
+  words(new LinkedList<ModbusRTUSlaveWordAddress*>()),
+  bits(new LinkedList<ModbusRTUSlaveBitAddress*>())
 {
-  slave = slaveAddress;
-  ser = serialport;
-  
-  words = new LinkedList<ModbusRTUSlaveWordAddress*>(); 
-  bits = new LinkedList<ModbusRTUSlaveBitAddress*>(); 
+  pinMode(this->controlPin, OUTPUT);
+  digitalWrite(this->controlPin, LOW);
 }
 
 void ModbusRTUSlave::begin(int baudrate) 
@@ -83,9 +86,10 @@ ModbusRTUSlaveBitAddress* ModbusRTUSlave::getBitAddress(u16 Addr, u16 Len)
 void ModbusRTUSlave::process()
 {
 	bool bvalid = true;
-	while(ser->available()) 
+	while(this->isDataAvail()) 
 	{
-		byte d = ser->read();
+		byte d = this->doRead();
+
 		lstResponse[ResCnt++]=d;
 		if(ResCnt>=4)
 		{
@@ -132,7 +136,7 @@ void ModbusRTUSlave::process()
 								getCRC(ret, 3+nlen+2, 0, 3+nlen, &hi, &lo);
 								ret[3+nlen]=hi;
 								ret[3+nlen+1]=lo;
-								ser->write(ret, 3+nlen+2);
+								this->doWrite(ret, 3+nlen+2);
 
 								ResCnt=0;
 							}
@@ -163,7 +167,7 @@ void ModbusRTUSlave::process()
 								getCRC(ret, 3+nlen+2, 0, 3+nlen, &hi, &lo);
 								ret[3+nlen]=hi;
 								ret[3+nlen+1]=lo;
-								ser->write(ret, 3+nlen+2);
+								this->doWrite(ret, 3+nlen+2);
 
 								ResCnt=0;
 							}
@@ -194,7 +198,7 @@ void ModbusRTUSlave::process()
 								getCRC(ret, 8, 0, 6, &hi, &lo);
 								ret[6]=hi;
 								ret[7]=lo;
-								ser->write(ret, 8);
+								this->doWrite(ret, 8);
 								
 								ResCnt=0;
 							}
@@ -225,7 +229,7 @@ void ModbusRTUSlave::process()
 								getCRC(ret, 8, 0, 6, &hi, &lo);
 								ret[6]=hi;
 								ret[7]=lo;
-								ser->write(ret, 8);
+								this->doWrite(ret, 8);
 
 								ResCnt=0;
 							}
@@ -273,7 +277,7 @@ void ModbusRTUSlave::process()
 											getCRC(ret, 8, 0, 6, &hi, &lo);
 											ret[6]=hi;
 											ret[7]=lo;
-											ser->write(ret, 8);
+											this->doWrite(ret, 8);
 
 											ResCnt=0;
 										}
@@ -314,7 +318,7 @@ void ModbusRTUSlave::process()
 										getCRC(ret, 8, 0, 6, &hi, &lo);
 										ret[6]=hi;
 										ret[7]=lo;
-										ser->write(ret, 8);
+										this->doWrite(ret, 8);
 
 										ResCnt=0;
 									}
@@ -361,6 +365,38 @@ void ModbusRTUSlave::getCRC(byte* pby, int arsize, int startindex, int nSize, by
 	}
 	(*byFirstReturn) = uchCRCHi;
 	(*bySecondReturn) = uchCRCLo;
+}
+
+void ModbusRTUSlave::switchToReadingIfNotReadingNow()
+{
+  if (not this->isReading)
+	{
+	  this->ser->flush();
+	  digitalWrite(this->controlPin, LOW);
+	  this->isReading = true;
+	}
+}
+
+bool ModbusRTUSlave::isDataAvail()
+{
+  this->switchToReadingIfNotReadingNow();
+  return this->ser->available();
+}
+
+int ModbusRTUSlave::doRead()
+{
+  this->switchToReadingIfNotReadingNow();
+  return ser->read();
+}
+
+void ModbusRTUSlave::doWrite(byte* buffer, int const length)
+{
+  if (this->isReading)
+	{
+	  digitalWrite(this->controlPin, HIGH);
+	  this->isReading = false;
+	}
+  this->ser->write(buffer, length);
 }
 
 boolean getBit(u8* area, int index)

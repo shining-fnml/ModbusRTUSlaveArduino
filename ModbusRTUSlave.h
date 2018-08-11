@@ -25,15 +25,18 @@ class ModbusRTUSlaveBitAddress
 class ModbusRTUSlave
 {
 	public : 
-		ModbusRTUSlave(byte Slave, HardwareSerial *ser);
+		ModbusRTUSlave(byte slaveId, HardwareSerial *ser, u8 conrolPinNumber);
 		void begin(int baudrate);
 		boolean addWordArea(u16 Address, u16* values, int cnt);
 		boolean addBitArea(u16 Address, u8* values, int cnt);
 		void process();
 
 	private:
-		byte slave;
-		HardwareSerial *ser;
+		byte const slave;
+		HardwareSerial * const ser;
+		u8 const controlPin;
+		bool isReading;
+
 		LinkedList<ModbusRTUSlaveWordAddress*>  *words;
 		LinkedList<ModbusRTUSlaveBitAddress*>  *bits;
 		ModbusRTUSlaveWordAddress* getWordAddress(u16 Addr);
@@ -44,6 +47,11 @@ class ModbusRTUSlave
 		int ResCnt=0;
 		unsigned long lastrecv;
 		void getCRC(byte* pby, int arsize, int startindex, int nSize, byte* byFirstReturn, byte* bySecondReturn);
+
+		void switchToReadingIfNotReadingNow();
+		bool isDataAvail();
+		int doRead();
+		void doWrite(byte*, int);
 };
 
 const byte auchCRCHi[] = {
