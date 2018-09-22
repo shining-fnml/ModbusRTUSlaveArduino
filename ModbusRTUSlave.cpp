@@ -109,7 +109,7 @@ void ModbusRTUSlave::process()
 	while(this->isDataAvail()) 
 	{
 		byte d = this->doRead();
-		_log("odebrano[");
+		_log("got[");
 		_log(ResCnt);
 		_log("]: ");
 		_log_ln(d, HEX);
@@ -120,7 +120,7 @@ void ModbusRTUSlave::process()
 			byte Slave = lstResponse[0];
 			if (ResCnt == 4)
 			{
-				_log("odebrano do slave'a: ");
+				_log("got msg addressed to slave: ");
 				_log_ln(Slave);
 			}
 			if(Slave == slave)
