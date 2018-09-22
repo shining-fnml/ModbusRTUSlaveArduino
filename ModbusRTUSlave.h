@@ -51,7 +51,7 @@ class ModbusRTUSlave
 		void switchToReadingIfNotReadingNow();
 		bool isDataAvail();
 		int doRead();
-		void doWrite(byte*, int);
+		void doWrite(byte*, uint32_t);
 };
 
 const byte auchCRCHi[] = {

@@ -2,7 +2,7 @@
 #include "utility/LinkedList.h"
 
 
-//#define MODBUS_DEBUG
+#define MODBUS_DEBUG
 
 #ifdef MODBUS_DEBUG
 # define _log_ln Serial.println
@@ -15,15 +15,16 @@ inline void emptyDebugLog(...) {}
 
 
 ModbusRTUSlave::ModbusRTUSlave(byte const slaveAddress, HardwareSerial* serialport, u8 const controlPinArg) :
-  slave(slaveAddress),
-  ser(serialport),
-  controlPin(controlPinArg),
-  isReading(true),
-  words(new LinkedList<ModbusRTUSlaveWordAddress*>()),
-  bits(new LinkedList<ModbusRTUSlaveBitAddress*>())
+	slave(slaveAddress),
+	ser(serialport),
+	controlPin(controlPinArg),
+	isReading(true),
+	words(new LinkedList<ModbusRTUSlaveWordAddress*>()),
+	bits(new LinkedList<ModbusRTUSlaveBitAddress*>()),
+	lastrecv(0) // no matter what value
 {
-  pinMode(this->controlPin, OUTPUT);
-  digitalWrite(this->controlPin, LOW);
+	pinMode(this->controlPin, OUTPUT);
+	digitalWrite(this->controlPin, LOW);
 }
 
 void ModbusRTUSlave::begin(int baudrate) 
@@ -195,6 +196,11 @@ void ModbusRTUSlave::process()
 
 								byte ret[3+nlen+2];
 								ret[0]=Slave;	ret[1]=Function;	ret[2]=nlen;
+#ifdef MODBUS_DEBUG
+								_log("writing original data, nlen:"); _log(nlen);
+								for (uint16_t j = 0; j < nlen; ++j) { _log(", "); _log(+reinterpret_cast<byte*>(a->values)[j]); }
+								_log_ln("");
+#endif
 								for(u16 i=stidx;i<stidx+Length;i++)
 								{
 									ret[3+((i-stidx)*2)+0]=((a->values[i] & 0xFF00) >> 8);
@@ -453,13 +459,21 @@ int ModbusRTUSlave::doRead()
   return ser->read();
 }
 
-void ModbusRTUSlave::doWrite(byte* buffer, int const length)
+void ModbusRTUSlave::doWrite(byte* buffer, uint32_t const length)
 {
-  if (this->isReading)
+	if (this->isReading)
 	{
-	  digitalWrite(this->controlPin, HIGH);
-	  this->isReading = false;
+		digitalWrite(this->controlPin, HIGH);
+		this->isReading = false;
 	}
+
+#ifdef MODBUS_DEBUG
+	_log("writing bytes: ");
+	for (uint32_t i = 0; i < length; ++i) { _log(+buffer[i]); _log(", "); }
+	_log("length:");
+	_log_ln(length);
+#endif
+
   this->ser->write(buffer, length);
 }
 
