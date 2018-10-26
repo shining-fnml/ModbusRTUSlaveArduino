@@ -55,13 +55,21 @@ boolean ModbusRTUSlave::addBitArea(u16 Address, u8* values, int cnt)
 
 ModbusRTUSlaveWordAddress* ModbusRTUSlave::getWordAddress(u16 Addr)
 {
-	ModbusRTUSlaveWordAddress* ret=NULL;
+	_log("addr:"); _log(Addr);
+	_log(" between:");
+
 	for(int i = 0; i < words->size(); i++)
 	{
 		ModbusRTUSlaveWordAddress* a = words->get(i);
-		if(a!=NULL && Addr >= a->addr && Addr < a->addr + a->len) ret=a;
+		_log(a->addr); _log("-"); _log(a->addr + a->len); _log(" ");
+		if(a!=NULL && Addr >= a->addr && Addr < a->addr + a->len)
+		  {
+			_log_ln("FOUND");
+			return a;
+		  }
 	}
-	return ret;
+	_log_ln("NOT FOUND");
+	return nullptr;
 }
 ModbusRTUSlaveBitAddress* ModbusRTUSlave::getBitAddress(u16 Addr)
 {
@@ -350,7 +358,11 @@ void ModbusRTUSlave::process()
 										u16 data = lstResponse[i] << 8 | lstResponse[i+1];
 										ModbusRTUSlaveWordAddress *a = getWordAddress(Address + ((i-7)/2));
 										if (a != NULL) { a->values[(Address + ((i-7)/2)) - a->addr] = data;	}
-										else { bvalid=false; break; }
+										else {
+										  _log_ln("making not bvalid because getWordAddress returned null");
+										  bvalid=false; 
+										  break;
+										}
 									}
 									if(bvalid)
 									{
@@ -370,7 +382,11 @@ void ModbusRTUSlave::process()
 										ResCnt=0;
 									}
 								}
-								else bvalid=false;
+								else
+								  {
+									_log_ln("making not bvalid because of CRC missmatch");
+									bvalid=false;
+								  }
 							}
 						}
 						break;
