@@ -12,21 +12,21 @@ ModbusRTUSlave::ModbusRTUSlave(byte const slaveAddress, HardwareSerial* serialpo
   bits(new LinkedList<ModbusRTUSlaveAddress*>()),
   discretes(new LinkedList<ModbusRTUSlaveAddress*>())
 {
-  pinMode(this->controlPin, OUTPUT);
-  digitalWrite(this->controlPin, LOW);
+	pinMode(controlPin, OUTPUT);
+	digitalWrite(controlPin, LOW);
 }
 
 void ModbusRTUSlave::begin(int baudrate, word mode) 
 {
 	ser->begin(baudrate, mode);
 	ResCnt=0;
+	twentyeightbits = 28000/baudrate + ((28000%baudrate) && 1);
 }
 
 void ModbusRTUSlave::setSerial(int baudrate, word mode)
 {
 	ser->flush();
-	ser->begin(baudrate, mode);
-	ResCnt=0;
+	begin(baudrate, mode);
 }
 
 boolean ModbusRTUSlave::addHoldingArea(uint16_t Address, uint16_t* values, size_t cnt)
@@ -368,11 +368,12 @@ static void ModbusRTUSlave::getCRC(byte* pby, int arsize, int startindex, int nS
 
 void ModbusRTUSlave::switchToReadingIfNotReadingNow()
 {
-  if (not this->isReading)
+  if (not isReading)
 	{
-	  this->ser->flush();
-	  digitalWrite(this->controlPin, LOW);
-	  this->isReading = true;
+	  ser->flush();
+	  delay(twentyeightbits);
+	  digitalWrite(controlPin, LOW);
+	  isReading = true;
 	}
 }
 
@@ -390,12 +391,12 @@ int ModbusRTUSlave::doRead()
 
 void ModbusRTUSlave::doWrite(byte* buffer, int const length)
 {
-  if (this->isReading)
-	{
-	  digitalWrite(this->controlPin, HIGH);
-	  this->isReading = false;
+	if (isReading) {
+		digitalWrite(controlPin, HIGH);
+		delay(twentyeightbits);
+		isReading = false;
 	}
-  this->ser->write(buffer, length);
+	ser->write(buffer, length);
 }
 
 void ModbusRTUSlave::setSlave(byte slaveId)
