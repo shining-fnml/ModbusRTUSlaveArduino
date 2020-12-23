@@ -1,57 +1,86 @@
 #ifndef _MODBUS_RTU_SLAVE_H
-#define _MODBUS_RTU_SLAVE_H
+# define _MODBUS_RTU_SLAVE_H
+# define u16 uint16_t
+# define u8 uint8_t
 
 #include "Arduino.h"
 #include "utility/LinkedList.h"
 
-class ModbusRTUSlaveWordAddress
+#define ADDRESS_TYPE_COIL	'c'
+#define ADDRESS_TYPE_DISCRETE	'd'
+#define ADDRESS_TYPE_HOLDING	'h'
+#define ADDRESS_TYPE_INPUT	'i'
+
+class ModbusRTUSlaveAddress
 {
 	public : 
 		u16 addr;
-		byte len;
-		u16 *values;
-		ModbusRTUSlaveWordAddress(u16 Address, u16* value, int cnt);
+		size_t len;
+		char type;
+		virtual void *getValues() = 0;
 };
 
-class ModbusRTUSlaveBitAddress
+class ModbusRTUSlaveWordAddress : public ModbusRTUSlaveAddress
 {
 	public : 
-		u16 addr;
-		byte len;
+		u16 *values;
+		ModbusRTUSlaveWordAddress(u16 Address, u16* value, size_t cnt, char adrtype);
+		void *getValues() { return values; };
+};
+
+class ModbusRTUSlaveBitAddress : public ModbusRTUSlaveAddress
+{
+	public : 
 		u8 *values;
-		ModbusRTUSlaveBitAddress(u16 Address, u8* value, int cnt);
+		ModbusRTUSlaveBitAddress(u16 Address, u8* value, size_t cnt, char adrtype);
+		void *getValues() { return values; };
 };
 
 class ModbusRTUSlave
 {
 	public : 
 		ModbusRTUSlave(byte slaveId, HardwareSerial *ser, u8 conrolPinNumber);
-		void begin(int baudrate);
-		boolean addWordArea(u16 Address, u16* values, int cnt);
-		boolean addBitArea(u16 Address, u8* values, int cnt);
-		void process();
+		void begin(int baudrate, word mode=SERIAL_8N1);
+		boolean addDiscreteArea(uint16_t Address, uint8_t* values, size_t cnt);
+		boolean addInputArea(uint16_t Address, uint16_t* values, size_t cnt);
+		boolean addHoldingArea(uint16_t Address, uint16_t* values, size_t cnt);
+		boolean addCoilArea(u16 Address, u8* values, size_t cnt);
+		ModbusRTUSlaveAddress *process();
+		void setSlave(byte slave);
+		void setSerial(int baudrate, word mode);
+		static void getCRC(byte* pby, int arsize, int startindex, int nSize, byte* byFirstReturn, byte* bySecondReturn);
 
 	private:
-		byte const slave;
+		byte slave;
 		HardwareSerial * const ser;
 		u8 const controlPin;
 		bool isReading;
 
-		LinkedList<ModbusRTUSlaveWordAddress*>  *words;
-		LinkedList<ModbusRTUSlaveBitAddress*>  *bits;
-		ModbusRTUSlaveWordAddress* getWordAddress(u16 Addr);
-		ModbusRTUSlaveBitAddress* getBitAddress(u16 Addr);
-		ModbusRTUSlaveWordAddress* getWordAddress(u16 Addr,u16 Len);
-		ModbusRTUSlaveBitAddress* getBitAddress(u16 Addr,u16 Len);
+		LinkedList<ModbusRTUSlaveAddress*>  *words;
+		LinkedList<ModbusRTUSlaveAddress*>  *bits;
+		LinkedList<ModbusRTUSlaveAddress*>  *discretes;
+		LinkedList<ModbusRTUSlaveAddress*>  *inputs;
+#if 0
+		ModbusRTUSlaveBitAddress* getArea(ModbusRTUSlaveBitAddress *area, int idx) { return bits->get(idx); };
+		ModbusRTUSlaveWordAddress* getArea(ModbusRTUSlaveWordAddress *area, int idx) { return words->get(idx); };
+		ModbusRTUSlaveInputAddress* getArea(ModbusRTUSlaveInputAddress *area, int idx) { return inputs->get(idx); };
+#endif
+		boolean addBitArea(uint16_t Address, uint8_t* values, size_t cnt, char areatype, LinkedList<ModbusRTUSlaveAddress *> *area);
+		boolean addWordArea(uint16_t Address, uint16_t* values, size_t cnt, char areatype, LinkedList<ModbusRTUSlaveAddress *> *area);
+		ModbusRTUSlaveWordAddress* getWordArea (uint16_t Addr, uint16_t Len=1) { return getAddress<ModbusRTUSlaveWordAddress *>(words, Addr, Len); };
+		ModbusRTUSlaveBitAddress* getBitArea(LinkedList<ModbusRTUSlaveAddress *> *area, uint16_t Addr, uint16_t Len=1) { return getAddress<ModbusRTUSlaveBitAddress *>(area, Addr, Len); };
+		ModbusRTUSlaveBitAddress* getCoilArea(uint16_t Addr, uint16_t Len=1) { return getAddress<ModbusRTUSlaveBitAddress *>(bits, Addr, Len); };
+		template <typename T> T getAddress(LinkedList<ModbusRTUSlaveAddress *> *area, uint16_t Addr, uint16_t Len=1);
+		void readBits(LinkedList<ModbusRTUSlaveAddress *> *area, uint16_t Address, byte Slave, byte Function, bool *bvalid);
+		void readWords(LinkedList<ModbusRTUSlaveAddress *> *area, uint16_t Address, byte Slave, byte Function, bool *bvalid);
 		byte lstResponse[300];
 		int ResCnt=0;
 		unsigned long lastrecv;
-		void getCRC(byte* pby, int arsize, int startindex, int nSize, byte* byFirstReturn, byte* bySecondReturn);
 
 		void switchToReadingIfNotReadingNow();
 		bool isDataAvail();
 		int doRead();
-		void doWrite(byte*, uint32_t);
+		void doWrite(byte*, int);
 };
 
 const byte auchCRCHi[] = {

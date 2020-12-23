@@ -2,232 +2,190 @@
 #include "utility/LinkedList.h"
 
 
-#define MODBUS_DEBUG
-
-#ifdef MODBUS_DEBUG
-# define _log_ln Serial.println
-# define _log Serial.print
-#else
-inline void emptyDebugLog(...) {}
-# define _log_ln emptyDebugLog
-# define _log emptyDebugLog
-#endif
-
-
 ModbusRTUSlave::ModbusRTUSlave(byte const slaveAddress, HardwareSerial* serialport, u8 const controlPinArg) :
-	slave(slaveAddress),
-	ser(serialport),
-	controlPin(controlPinArg),
-	isReading(true),
-	words(new LinkedList<ModbusRTUSlaveWordAddress*>()),
-	bits(new LinkedList<ModbusRTUSlaveBitAddress*>()),
-	lastrecv(0) // no matter what value
+  slave(slaveAddress),
+  ser(serialport),
+  controlPin(controlPinArg),
+  isReading(true),
+  words(new LinkedList<ModbusRTUSlaveAddress*>()),
+  inputs(new LinkedList<ModbusRTUSlaveAddress*>()),
+  bits(new LinkedList<ModbusRTUSlaveAddress*>()),
+  discretes(new LinkedList<ModbusRTUSlaveAddress*>())
 {
-	pinMode(this->controlPin, OUTPUT);
-	digitalWrite(this->controlPin, LOW);
+  pinMode(this->controlPin, OUTPUT);
+  digitalWrite(this->controlPin, LOW);
 }
 
-void ModbusRTUSlave::begin(int baudrate) 
+void ModbusRTUSlave::begin(int baudrate, word mode) 
 {
-	ser->begin(baudrate);
+	ser->begin(baudrate, mode);
 	ResCnt=0;
 }
 
-boolean ModbusRTUSlave::addWordArea(u16 Address, u16* values, int cnt)
+void ModbusRTUSlave::setSerial(int baudrate, word mode)
 {
-	if(getWordAddress(Address)==NULL)
-	{
-		words->add(new ModbusRTUSlaveWordAddress(Address, values, cnt));
+	ser->flush();
+	ser->begin(baudrate, mode);
+	ResCnt=0;
+}
+
+boolean ModbusRTUSlave::addHoldingArea(uint16_t Address, uint16_t* values, size_t cnt)
+{
+	return addWordArea(Address, values, cnt, ADDRESS_TYPE_HOLDING, words);
+}
+
+boolean ModbusRTUSlave::addInputArea(uint16_t Address, uint16_t* values, size_t cnt)
+{
+	return addWordArea(Address, values, cnt, ADDRESS_TYPE_INPUT, inputs);
+}
+
+boolean ModbusRTUSlave::addWordArea(uint16_t Address, uint16_t *values, size_t cnt, char areatype, LinkedList<ModbusRTUSlaveAddress *> *area)
+{
+	for(int i = 0; i < area->size(); i++) {
+		ModbusRTUSlaveAddress *a = area->get(i);
+
+		if(a!=NULL && Address >= a->addr && Address+cnt <= a->addr+a->len)
+			return false;
+	}
+	area->add(new ModbusRTUSlaveWordAddress(Address, values, cnt, areatype));
+	return true;
+}
+
+boolean ModbusRTUSlave::addCoilArea(uint16_t Address, uint8_t* values, size_t cnt)
+{
+	return addBitArea(Address, values, cnt, ADDRESS_TYPE_COIL, bits);
+}
+
+boolean ModbusRTUSlave::addDiscreteArea(uint16_t Address, uint8_t* values, size_t cnt)
+{
+	return addBitArea(Address, values, cnt, ADDRESS_TYPE_DISCRETE, discretes);
+}
+
+boolean ModbusRTUSlave::addBitArea(uint16_t Address, uint8_t* values, size_t cnt, char areatype, LinkedList<ModbusRTUSlaveAddress *> *area)
+{
+	if(getAddress<ModbusRTUSlaveBitAddress *>(area, Address, cnt) == NULL) {
+		area->add(new ModbusRTUSlaveBitAddress(Address, values, cnt, areatype));
 		return true;
 	}
 	return false;
 }
 
-boolean ModbusRTUSlave::addBitArea(u16 Address, u8* values, int cnt)
+template <typename T>
+T ModbusRTUSlave::getAddress(LinkedList<ModbusRTUSlaveAddress*> *area, uint16_t Addr, uint16_t Len)
 {
-	if(getBitAddress(Address)==NULL)
-	{
-		bits->add(new ModbusRTUSlaveBitAddress(Address, values, cnt));
-		return true;
-	}
-	return false;
-}
-
-ModbusRTUSlaveWordAddress* ModbusRTUSlave::getWordAddress(u16 Addr)
-{
-	_log("addr:"); _log(Addr);
-	_log(" between:");
-
-	for(int i = 0; i < words->size(); i++)
-	{
-		ModbusRTUSlaveWordAddress* a = words->get(i);
-		_log(a->addr); _log("-"); _log(a->addr + a->len); _log(" ");
-		if(a!=NULL && Addr >= a->addr && Addr < a->addr + a->len)
-		  {
-			_log_ln("FOUND");
-			return a;
-		  }
-	}
-	_log_ln("NOT FOUND");
-	return nullptr;
-}
-ModbusRTUSlaveBitAddress* ModbusRTUSlave::getBitAddress(u16 Addr)
-{
-	ModbusRTUSlaveBitAddress* ret=NULL;
-	for(int i = 0; i < bits->size(); i++)
-	{
-		ModbusRTUSlaveBitAddress* a = bits->get(i);
-		if(a!=NULL && Addr >= a->addr && Addr < a->addr + (a->len*8)) ret=a;
-	}
-	return ret;
-}
-
-ModbusRTUSlaveWordAddress* ModbusRTUSlave::getWordAddress(u16 Addr, u16 Len)
-{
-	_log("addr:"); _log(Addr);_log(", len:");_log(Len);
-	_log(" between:");
-	for(int i = 0; i < words->size(); i++)
-	{
-		ModbusRTUSlaveWordAddress* a = words->get(i);
-		_log(a->addr); _log(" ");
+	for(int i = 0; i < area->size(); i++) {
+		T a = area->get(i);
 		if(a!=NULL && Addr >= a->addr && Addr+Len <= a->addr + a->len)
-		{
-			_log_ln("FOUND");
 			return a;
-		}
 	}
-	_log_ln("NOT FOUND");
-	return nullptr;
+	return NULL;
 }
-ModbusRTUSlaveBitAddress* ModbusRTUSlave::getBitAddress(u16 Addr, u16 Len)
+
+void ModbusRTUSlave::readBits(LinkedList<ModbusRTUSlaveAddress *> *area, uint16_t Address, byte Slave, byte Function, bool *bvalid)
 {
-	ModbusRTUSlaveBitAddress* ret=NULL;
-	for(int i = 0; i < bits->size(); i++)
-	{
-		ModbusRTUSlaveBitAddress* a = bits->get(i);
-		if(a!=NULL && Addr >= a->addr && Addr+Len <= a->addr + (a->len*8)) ret=a;
+	if(ResCnt < 8)
+		return;
+	u16 Length = (lstResponse[4] << 8) | lstResponse[5];
+	byte hi = 0xFF, lo = 0xFF;
+	getCRC(lstResponse,300, 0, 6, &hi, &lo);
+	ModbusRTUSlaveBitAddress *a = getBitArea(area, Address, Length);
+	if (!(Length > 0 && a != NULL && lstResponse[6] == hi && lstResponse[7] == lo)) {
+		*bvalid = false;
+		return;
 	}
-	return ret;
+	u16 stidx = (Address - a->addr) / 8;
+	u16 nlen = ((Length-1) / 8)+1;
+
+	byte dat[nlen];
+	memset(dat,0,nlen);
+
+	int ng=(Address - a->addr) % 8;
+	int ns=stidx;
+	for(int i=0;i<nlen;i++) {
+		byte val=0;
+		for(int j=0;j<8;j++) {
+			if(bitRead(a->values[ns], ng++))
+				bitSet(val,j);
+			if(ng==8) {
+				ns++;
+				ng=0;
+			}
+		}
+		dat[i]=val;
+	}
+
+	byte ret[3+nlen+2];
+	ret[0]=Slave;	ret[1]=Function;	ret[2]=nlen;
+	for(int i=0;i<nlen;i++)
+		ret[3+i]=dat[i];
+	hi = 0xFF;
+	lo = 0xFF;
+	getCRC(ret, 3+nlen+2, 0, 3+nlen, &hi, &lo);
+	ret[3+nlen]=hi;
+	ret[3+nlen+1]=lo;
+	doWrite(ret, 3+nlen+2);
+	ResCnt=0;
 }
 
+void ModbusRTUSlave::readWords(LinkedList<ModbusRTUSlaveAddress *> *area, uint16_t Address, byte Slave, byte Function, bool *bvalid)
+{
+	if(ResCnt < 8)
+		return;
+	u16 Length = (lstResponse[4] << 8) | lstResponse[5];
+	byte hi = 0xFF, lo = 0xFF;
+	getCRC(lstResponse,300, 0, 6, &hi, &lo);
+	ModbusRTUSlaveWordAddress *a = getAddress<ModbusRTUSlaveWordAddress *>(area, Address, Length);
+	if (!(Length > 0 && a != NULL && lstResponse[6] == hi && lstResponse[7] == lo)) {
+		*bvalid = false;
+		return;
+	}
+	u16 stidx = Address - a->addr;
+	u16 nlen = Length * 2;
 
-void ModbusRTUSlave::process()
+	byte ret[3+nlen+2];
+	ret[0]=Slave;	ret[1]=Function;	ret[2]=nlen;
+	for(int i=stidx;i<stidx+Length;i++) {
+		ret[3+((i-stidx)*2)+0]=((a->values[i] & 0xFF00) >> 8);
+		ret[3+((i-stidx)*2)+1]=((a->values[i] & 0xFF));
+	}
+	hi = 0xFF;
+	lo = 0xFF;
+	getCRC(ret, 3+nlen+2, 0, 3+nlen, &hi, &lo);
+	ret[3+nlen]=hi;
+	ret[3+nlen+1]=lo;
+	doWrite(ret, 3+nlen+2);
+	ResCnt=0;
+}
+
+ModbusRTUSlaveAddress *ModbusRTUSlave::process()
 {
 	bool bvalid = true;
+	ModbusRTUSlaveAddress *modifiedArea = NULL;
+
 	while(this->isDataAvail()) 
 	{
 		byte d = this->doRead();
-		_log("got[");
-		_log(ResCnt);
-		_log("]: ");
-		_log_ln(d, HEX);
 
 		lstResponse[ResCnt++]=d;
 		if(ResCnt>=4)
 		{
 			byte Slave = lstResponse[0];
-			if (ResCnt == 4)
-			{
-				_log("got msg addressed to slave: ");
-				_log_ln(Slave);
-			}
 			if(Slave == slave)
 			{
 				byte Function = lstResponse[1];
-	            u16 Address = (lstResponse[2] << 8) | lstResponse[3];
-
-	            if (ResCnt == 4)
-	            {
-	            	_log("function:");
-	            	_log(Function);
-	            	_log(", address:");
-	            	_log_ln(Address);
-	            }
-
+				u16 Address = (lstResponse[2] << 8) | lstResponse[3];
 				switch(Function)
 				{
 					case 1:		//BitRead
+						readBits(bits, Address, Slave, Function, &bvalid);
 					case 2:
-						if(ResCnt >= 8)
-						{
-							u16 Length = (lstResponse[4] << 8) | lstResponse[5];
-							byte hi = 0xFF, lo = 0xFF;
-							getCRC(lstResponse,300, 0, 6, &hi, &lo);
-							ModbusRTUSlaveBitAddress *a = getBitAddress(Address, Length);
-							if (Length > 0 && a != NULL && lstResponse[6] == hi && lstResponse[7] == lo)
-							{
-								u16 stidx = (Address - a->addr) / 8;
-								u16 nlen = ((Length-1) / 8)+1;
-
-								byte dat[nlen];
-								memset(dat,0,nlen);
-
-								int ng=(Address - a->addr) % 8;
-								int ns=stidx;
-								for(u16 i=0;i<nlen;i++)
-								{
-									byte val=0;
-									for(int j=0;j<8;j++)
-									{
-										if(bitRead(a->values[ns], ng++)) bitSet(val,j);
-										if(ng==8){ns++;ng=0;}
-									}
-									dat[i]=val;
-								}
-								
-								byte ret[3+nlen+2];
-								ret[0]=Slave;	ret[1]=Function;	ret[2]=nlen;
-								for(u16 i=0;i<nlen;i++) ret[3+i]=dat[i];
-  							    byte hi = 0xFF, lo = 0xFF;
-								getCRC(ret, 3+nlen+2, 0, 3+nlen, &hi, &lo);
-								ret[3+nlen]=hi;
-								ret[3+nlen+1]=lo;
-								this->doWrite(ret, 3+nlen+2);
-
-								ResCnt=0;
-							}
-							else bvalid = false;
-						}
+						readBits(discretes, Address, Slave, Function, &bvalid);
 						break;
 					case 3:		//WordRead	
+						readWords(words, Address, Slave, Function, &bvalid);
+						break;
 					case 4:
-						if(ResCnt >= 8)
-						{
-							u16 Length = (lstResponse[4] << 8) | lstResponse[5];
-							byte hi = 0xFF, lo = 0xFF;
-							getCRC(lstResponse,300, 0, 6, &hi, &lo);
-							ModbusRTUSlaveWordAddress *a = getWordAddress(Address, Length);
-							if (Length > 0 && a != NULL && lstResponse[6] == hi && lstResponse[7] == lo)
-							{
-								u16 stidx = Address - a->addr;
-								u16 nlen = Length * 2;
-
-								byte ret[3+nlen+2];
-								ret[0]=Slave;	ret[1]=Function;	ret[2]=nlen;
-#ifdef MODBUS_DEBUG
-								_log("writing original data, nlen:"); _log(nlen);
-								for (uint16_t j = 0; j < nlen; ++j) { _log(", "); _log(+reinterpret_cast<byte*>(a->values)[j]); }
-								_log_ln("");
-#endif
-								for(u16 i=stidx;i<stidx+Length;i++)
-								{
-									ret[3+((i-stidx)*2)+0]=((a->values[i] & 0xFF00) >> 8);
-									ret[3+((i-stidx)*2)+1]=((a->values[i] & 0xFF));
-								}
-  							    byte hi = 0xFF, lo = 0xFF;
-								getCRC(ret, 3+nlen+2, 0, 3+nlen, &hi, &lo);
-								ret[3+nlen]=hi;
-								ret[3+nlen+1]=lo;
-								this->doWrite(ret, 3+nlen+2);
-
-								ResCnt=0;
-							}
-							else
-							{
-								_log_ln(Length); _log_ln(a!=NULL); _log_ln(lstResponse[6]); _log_ln(lstResponse[7]);
-								bvalid = false;
-							}
-						}
+						readWords(inputs, Address, Slave, Function, &bvalid);
 						break;
 					case 5:		//BitWrite
 						if(ResCnt >= 8)
@@ -235,7 +193,7 @@ void ModbusRTUSlave::process()
 							u16 Data = (lstResponse[4] << 8) | lstResponse[5];
 							byte hi = 0xFF, lo = 0xFF;
 							getCRC(lstResponse,300, 0, 6, &hi, &lo);
-							ModbusRTUSlaveBitAddress *a = getBitAddress(Address);
+							ModbusRTUSlaveBitAddress *a = getCoilArea(Address);
 							if (a != NULL && lstResponse[6] == hi && lstResponse[7] == lo)
 							{
 								u16 stidx = (Address - a->addr) / 8;
@@ -249,13 +207,13 @@ void ModbusRTUSlave::process()
 								ret[3]=((Address&0x00FF));
 								ret[4]=((Data&0xFF00)>>8);
 								ret[5]=((Data&0x00FF));
-  							    byte hi = 0xFF, lo = 0xFF;
+								byte hi = 0xFF, lo = 0xFF;
 								getCRC(ret, 8, 0, 6, &hi, &lo);
 								ret[6]=hi;
 								ret[7]=lo;
-								this->doWrite(ret, 8);
-								
+								doWrite(ret, 8);
 								ResCnt=0;
+								modifiedArea = a;
 							}
 							else bvalid = false;
 						}
@@ -266,7 +224,7 @@ void ModbusRTUSlave::process()
 							u16 Data = (lstResponse[4] << 8) | lstResponse[5];
 							byte hi = 0xFF, lo = 0xFF;
 							getCRC(lstResponse,300, 0, 6, &hi, &lo);
-							ModbusRTUSlaveWordAddress *a = getWordAddress(Address);
+							ModbusRTUSlaveWordAddress *a = getWordArea(Address);
 							if (a != NULL && lstResponse[6] == hi && lstResponse[7] == lo)
 							{
 								u16 stidx = Address - a->addr;
@@ -280,12 +238,12 @@ void ModbusRTUSlave::process()
 								ret[3]=((Address&0x00FF));
 								ret[4]=((Data&0xFF00)>>8);
 								ret[5]=((Data&0x00FF));
-  							    byte hi = 0xFF, lo = 0xFF;
+								byte hi = 0xFF, lo = 0xFF;
 								getCRC(ret, 8, 0, 6, &hi, &lo);
 								ret[6]=hi;
 								ret[7]=lo;
-								this->doWrite(ret, 8);
-
+								doWrite(ret, 8);
+								modifiedArea = a;
 								ResCnt=0;
 							}
 							else bvalid = false;
@@ -302,7 +260,7 @@ void ModbusRTUSlave::process()
 								getCRC(lstResponse,300, 0, 7 + ByteCount, &hi, &lo);
 								if(lstResponse[(9 + ByteCount - 2)] == hi && lstResponse[(9 + ByteCount - 1)] == lo)
 								{
-									ModbusRTUSlaveBitAddress *a = getBitAddress(Address, Length);
+									ModbusRTUSlaveBitAddress *a = getCoilArea(Address, Length);
 									if (a != NULL) 
 									{
 										u16 stidx = (Address - a->addr) / 8;
@@ -333,7 +291,7 @@ void ModbusRTUSlave::process()
 											ret[6]=hi;
 											ret[7]=lo;
 											this->doWrite(ret, 8);
-
+											modifiedArea = a;
 											ResCnt=0;
 										}
 									}
@@ -353,16 +311,13 @@ void ModbusRTUSlave::process()
 								getCRC(lstResponse,300, 0, 7 + ByteCount, &hi, &lo);
 								if(lstResponse[(9 + ByteCount - 2)] == hi && lstResponse[(9 + ByteCount - 1)] == lo)
 								{
+									modifiedArea = getWordArea(Address);
 									for(int i=7; i<7+ByteCount;i+=2)
 									{
 										u16 data = lstResponse[i] << 8 | lstResponse[i+1];
-										ModbusRTUSlaveWordAddress *a = getWordAddress(Address + ((i-7)/2));
+										ModbusRTUSlaveWordAddress *a = getWordArea(Address + ((i-7)/2));
 										if (a != NULL) { a->values[(Address + ((i-7)/2)) - a->addr] = data;	}
-										else {
-										  _log_ln("making not bvalid because getWordAddress returned null");
-										  bvalid=false; 
-										  break;
-										}
+										else { bvalid=false; break; }
 									}
 									if(bvalid)
 									{
@@ -377,68 +332,26 @@ void ModbusRTUSlave::process()
 										getCRC(ret, 8, 0, 6, &hi, &lo);
 										ret[6]=hi;
 										ret[7]=lo;
-										this->doWrite(ret, 8);
-
+										doWrite(ret, 8);
 										ResCnt=0;
 									}
 								}
-								else
-								  {
-									_log_ln("making not bvalid because of CRC missmatch");
-									bvalid=false;
-								  }
+								else bvalid=false;
 							}
 						}
 						break;
 				}
 			}
-			else
-			{
-				if (bvalid)
-				{
-					_log("not our slave, we are:");
-					_log(this->slave);
-					_log(" got request to slaveNum:");
-					_log_ln(Slave);
-					bvalid = false;
-				}
-			}
+			else bvalid = false;
 		}
 		lastrecv = millis();
 	}
-	if(!bvalid && ResCnt>0)
-	{
-		_log_ln("reset because not bvalid");
-		ResCnt=0;
-	}
-	auto milis = millis();
-	if(ResCnt>0 && (milis-lastrecv > 200 || milis < lastrecv))
-	{
-		_log("reset due to lastrecv:");
-		_log(lastrecv);
-		_log(" and millis:");
-		_log_ln(milis);
+	if(!bvalid && ResCnt>0) ResCnt=0;
+	if(ResCnt>0 && (millis()-lastrecv > 200 || millis() < lastrecv)) ResCnt=0;
+	return modifiedArea;
+}
 
-		ResCnt=0;
-	}
-}
-/*
-void ModbusRTUSlave::getCRC(LinkedList<byte>* pby, int startindex, int nSize, byte* byFirstReturn, byte* bySecondReturn)
-{
-	int uIndex;
-	byte uchCRCHi = 0xff;
-	byte uchCRCLo = 0xff;
-	for (int i = startindex; i < startindex + nSize && i<pby->size(); i++)
-	{
-		uIndex = uchCRCHi ^ pby->get(i);
-		uchCRCHi = uchCRCLo ^ auchCRCHi[uIndex];
-		uchCRCLo = auchCRCLo[uIndex];
-	}
-	(*byFirstReturn) = uchCRCHi;
-	(*bySecondReturn) = uchCRCLo;
-}
-*/
-void ModbusRTUSlave::getCRC(byte* pby, int arsize, int startindex, int nSize, byte* byFirstReturn, byte* bySecondReturn)
+static void ModbusRTUSlave::getCRC(byte* pby, int arsize, int startindex, int nSize, byte* byFirstReturn, byte* bySecondReturn)
 {
 	int uIndex;
 	byte uchCRCHi = 0xff;
@@ -475,22 +388,19 @@ int ModbusRTUSlave::doRead()
   return ser->read();
 }
 
-void ModbusRTUSlave::doWrite(byte* buffer, uint32_t const length)
+void ModbusRTUSlave::doWrite(byte* buffer, int const length)
 {
-	if (this->isReading)
+  if (this->isReading)
 	{
-		digitalWrite(this->controlPin, HIGH);
-		this->isReading = false;
+	  digitalWrite(this->controlPin, HIGH);
+	  this->isReading = false;
 	}
-
-#ifdef MODBUS_DEBUG
-	_log("writing bytes: ");
-	for (uint32_t i = 0; i < length; ++i) { _log(+buffer[i]); _log(", "); }
-	_log("length:");
-	_log_ln(length);
-#endif
-
   this->ser->write(buffer, length);
+}
+
+void ModbusRTUSlave::setSlave(byte slaveId)
+{
+	slave = slaveId;
 }
 
 boolean getBit(u8* area, int index)
@@ -505,16 +415,18 @@ void setBit(u8* area, int index, bool value)
 	bitWrite(area[stidx], index%8, value);
 }
 
-ModbusRTUSlaveBitAddress::ModbusRTUSlaveBitAddress(u16 Address, u8* value, int cnt)
+ModbusRTUSlaveBitAddress::ModbusRTUSlaveBitAddress(u16 Address, u8* value, size_t cnt, char adrtype)
 {
 	addr = Address;
 	values = value;
 	len = cnt;
+	type = adrtype;
 }
 
-ModbusRTUSlaveWordAddress::ModbusRTUSlaveWordAddress(u16 Address, u16* value, int cnt)
+ModbusRTUSlaveWordAddress::ModbusRTUSlaveWordAddress(uint16_t Address, uint16_t* value, size_t cnt, char adrtype)
 {
 	addr = Address;
 	values = value;
 	len = cnt;
+	type = adrtype;
 }
