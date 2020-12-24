@@ -22,7 +22,7 @@ void ModbusRTUSlave::begin(int baudrate, word mode)
 
 	ser->begin(baudrate, mode);
 	ResCnt=0;
-	twentyeightbits = dividend/baudrate + (dividend%baudrate) && 1;
+	twentyeightbits = dividend/baudrate + ((dividend%baudrate) && 1);
 }
 
 void ModbusRTUSlave::setSerial(int baudrate, word mode)
