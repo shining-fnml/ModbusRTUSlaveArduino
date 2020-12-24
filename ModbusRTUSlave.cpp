@@ -18,9 +18,11 @@ ModbusRTUSlave::ModbusRTUSlave(byte const slaveAddress, HardwareSerial* serialpo
 
 void ModbusRTUSlave::begin(int baudrate, word mode) 
 {
+	unsigned long dividend = 28000000UL;
+
 	ser->begin(baudrate, mode);
 	ResCnt=0;
-	twentyeightbits = 28000/baudrate + ((28000%baudrate) && 1);
+	twentyeightbits = dividend/baudrate + (dividend%baudrate) && 1;
 }
 
 void ModbusRTUSlave::setSerial(int baudrate, word mode)

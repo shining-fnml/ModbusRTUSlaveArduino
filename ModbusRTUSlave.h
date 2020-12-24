@@ -76,7 +76,7 @@ class ModbusRTUSlave
 		byte lstResponse[300];
 		int ResCnt=0;
 		unsigned long lastrecv;
-		uint16_t twentyeightbits;
+		unsigned int twentyeightbits;
 
 		void switchToReadingIfNotReadingNow();
 		bool isDataAvail();
