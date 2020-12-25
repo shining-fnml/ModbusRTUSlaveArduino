@@ -370,13 +370,12 @@ static void ModbusRTUSlave::getCRC(byte* pby, int arsize, int startindex, int nS
 
 void ModbusRTUSlave::switchToReadingIfNotReadingNow()
 {
-  if (not isReading)
-	{
-	  ser->flush();
-	  delay(twentyeightbits);
-	  digitalWrite(controlPin, LOW);
-	  isReading = true;
-	}
+	if (isReading)
+		return;
+	ser->flush();
+	delayMicroseconds(twentyeightbits);
+	digitalWrite(controlPin, LOW);
+	isReading = true;
 }
 
 bool ModbusRTUSlave::isDataAvail()
@@ -395,7 +394,7 @@ void ModbusRTUSlave::doWrite(byte* buffer, int const length)
 {
 	if (isReading) {
 		digitalWrite(controlPin, HIGH);
-		delay(twentyeightbits);
+		delayMicroseconds(twentyeightbits);
 		isReading = false;
 	}
 	ser->write(buffer, length);
